@@ -205,6 +205,14 @@ def compute_quadrant(task: dict) -> str:
 
 # ============= 微信消息处理 =============
 
+SITE_URL = os.environ.get("SITE_URL", "https://todo-bot-0ly4.onrender.com")
+FOOTER = f"\n\n─────\n📊 {SITE_URL}\n发送「帮助」查看所有命令"
+
+
+def reply_with_footer(text: str) -> str:
+    return text + FOOTER
+
+
 def handle_text_message(from_user: str, to_user: str, content: str) -> str:
     msg = content.strip()
     tasks = load_tasks()
@@ -213,7 +221,7 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
     # ===== 命令处理 =====
     # 帮助
     if msg in ('帮助', 'help', '?', '？', 'h'):
-        return (
+        return reply_with_footer(
             "📋 可用命令：\n\n"
             "▸ 直接发待办文本 → 自动添加\n"
             "▸ 列表 / list → 查看所有任务\n"
@@ -227,7 +235,7 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
     if msg in ('列表', 'list', 'ls', '查看', '任务', 'cx'):
         active = [t for t in tasks if not t.get('completed')]
         if not active:
-            return "🌸 暂无待办任务\n\n发送文本即可添加，如：\n明天下午3点开会"
+            return reply_with_footer("🌸 暂无待办任务\n\n发送文本即可添加，如：\n明天下午3点开会")
         lines = [f"📋 共 {len(active)} 项待办：\n"]
         for i, t in enumerate(active[:15]):  # 最多显示15条
             label = t.get('label') or t.get('text', '')
@@ -244,14 +252,14 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
             lines.append(f"{i+1}. {qe.get(quad,'')} {label}  [{cat}]{due_str}")
         if len(active) > 15:
             lines.append(f"\n... 还有 {len(active)-15} 项，打开网页查看全部")
-        return '\n'.join(lines)
+        return reply_with_footer('\n'.join(lines))
 
     # 完成任务（模糊匹配 label）
     for prefix in ('完成', 'done', 'finish', 'ok'):
         if msg.startswith(prefix):
             keyword = msg[len(prefix):].strip().replace('"', '').replace('"', '')
             if not keyword:
-                return "请指定要完成的任务名，如：完成 开会"
+                return reply_with_footer("请指定要完成的任务名，如：完成 开会")
             found = None
             for t in tasks:
                 lbl = t.get('label', '') or t.get('text', '')
@@ -261,15 +269,15 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
                 found['completed'] = True
                 found['completedAt'] = now.isoformat()
                 save_tasks(tasks)
-                return f"✅ 已完成：{found.get('label') or found.get('text')}"
-            return f"未找到匹配的未完成任务：「{keyword}」"
+                return reply_with_footer(f"✅ 已完成：{found.get('label') or found.get('text')}")
+            return reply_with_footer(f"未找到匹配的未完成任务：「{keyword}」")
 
     # 删除任务
     for prefix in ('删除', 'del', 'remove', 'rm'):
         if msg.startswith(prefix):
             keyword = msg[len(prefix):].strip().replace('"', '').replace('"', '')
             if not keyword:
-                return "请指定要删除的任务名，如：删除 取快递"
+                return reply_with_footer("请指定要删除的任务名，如：删除 取快递")
             found = None
             for t in tasks:
                 lbl = t.get('label', '') or t.get('text', '')
@@ -278,12 +286,12 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
             if found:
                 tasks.remove(found)
                 save_tasks(tasks)
-                return f"🗑 已删除：{found.get('label') or found.get('text')}"
-            return f"未找到匹配的任务：「{keyword}」"
+                return reply_with_footer(f"🗑 已删除：{found.get('label') or found.get('text')}")
+            return reply_with_footer(f"未找到匹配的任务：「{keyword}」")
 
     # 设置
     if msg in ('设置', 'settings', 'config'):
-        return (
+        return reply_with_footer(
             "⚙ 当前提醒设置：\n"
             f"📚 学业：提前 {DEFAULT_REMINDERS['作业限期']} 分钟\n"
             f"💼 工作：提前 {DEFAULT_REMINDERS['会议安排']} 分钟\n"
@@ -298,7 +306,7 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
     result = analyze_with_llm(msg)
 
     if result is None:
-        return (
+        return reply_with_footer(
             "抱歉，AI 暂时无法分析这条消息。\n\n"
             "试一试这样说：\n"
             "• 明天下午3点去301会议室开会\n"
@@ -383,7 +391,7 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
             else: remind_texts.append(f"提前{r}分钟")
         reply += f"🔔 {'、'.join(remind_texts)}提醒\n"
 
-    return reply
+    return reply_with_footer(reply)
 
 
 # ============= Flask 路由 =============
