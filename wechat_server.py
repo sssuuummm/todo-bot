@@ -843,12 +843,14 @@ def api_add_task():
 
 @app.route("/my-ip")
 def my_ip():
-    """返回 Render 服务器 IP"""
-    try:
-        r = requests.get("https://api.ipify.org", timeout=5)
-        return {"ip": r.text.strip()}
-    except Exception:
-        return {"ip": request.remote_addr or "unknown"}
+    """返回 Render 服务器 IP + 微信配置状态"""
+    token_ok = bool(get_wx_access_token())
+    return {
+        "ip": request.remote_addr or "unknown",
+        "wx_app_id_set": bool(WX_APP_ID),
+        "wx_secret_set": bool(WX_APP_SECRET),
+        "wx_token_ok": token_ok,
+    }
 
 
 @app.route("/scheduled-push", methods=["GET", "POST"])
