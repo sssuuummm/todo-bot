@@ -553,8 +553,9 @@ def wechat():
                 raw = gzip.decompress(raw)
             except Exception:
                 pass
-        # 从 bytes 直接解析 XML
-        root = ET.fromstring(raw)
+        # 解码：微信发的是 UTF-8 XML
+        xml_data = raw.decode('utf-8', errors='replace')
+        root = ET.fromstring(xml_data)
         msg_type = root.findtext("MsgType", "")
         from_user = root.findtext("FromUserName", "")
         to_user = root.findtext("ToUserName", "")
