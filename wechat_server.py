@@ -598,7 +598,10 @@ class WeworkCrypto:
 
 
 # 初始化企业微信加解密（需要 pycryptodome）
-wework_crypto = WeworkCrypto(WEWORK_TOKEN, WEWORK_AES_KEY, WEWORK_CORP_ID) if HAS_CRYPTO else None
+try:
+    wework_crypto = WeworkCrypto(WEWORK_TOKEN, WEWORK_AES_KEY, WEWORK_CORP_ID) if HAS_CRYPTO else None
+except Exception:
+    wework_crypto = None
 
 # 企业微信 access_token
 _wework_token_cache = {"token": "", "expires": 0}
