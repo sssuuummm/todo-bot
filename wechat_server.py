@@ -7,6 +7,7 @@ import hashlib
 import time
 import re
 import os
+import gzip
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from flask import Flask, request, Response, send_from_directory
@@ -543,7 +544,19 @@ def wechat():
         return "verification failed"
 
     try:
-        xml_data = request.data.decode("utf-8")
+        raw = request.data
+        # 微信可能发 gzip 压缩数据
+        if raw[:2] == b'\x1f\x8b':
+            raw = gzip.decompress(raw)
+        # 尝试多种编码
+        for enc in ('utf-8', 'gb2312', 'gbk', 'latin-1'):
+            try:
+                xml_data = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            xml_data = raw.decode('utf-8', errors='replace')
         root = ET.fromstring(xml_data)
         msg_type = root.findtext("MsgType", "")
         from_user = root.findtext("FromUserName", "")
