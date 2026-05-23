@@ -773,14 +773,17 @@ def wework():
 
 @app.route("/api/tasks", methods=["GET"])
 def api_tasks():
-    tasks = get_all_tasks_flat()
-    # 按象限排序
-    def sort_key(t):
-        quad_order = {"救火区": 0, "投资区": 1, "干扰区": 2, "黑洞区": 3}
-        q = compute_quadrant(t)
-        return quad_order.get(q, 3) * 1000 - (t.get("priority", 1) * 100)
-    tasks.sort(key=sort_key)
-    return {"tasks": tasks}
+    try:
+        tasks = get_all_tasks_flat()
+        # 按象限排序
+        def sort_key(t):
+            quad_order = {"救火区": 0, "投资区": 1, "干扰区": 2, "黑洞区": 3}
+            q = compute_quadrant(t)
+            return quad_order.get(q, 3) * 1000 - (t.get("priority", 1) * 100)
+        tasks.sort(key=sort_key)
+        return {"tasks": tasks}
+    except Exception as e:
+        return {"tasks": [], "error": str(e)}
 
 
 @app.route("/api/add-task", methods=["GET", "POST"])
