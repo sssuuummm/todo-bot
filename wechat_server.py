@@ -858,7 +858,13 @@ def scheduled_push():
     """定时推送：13点推当日任务，22点推睡觉提醒"""
     load_all()
     now = datetime.now(TZ)
-    hour = now.hour
+    force = request.args.get("force")
+    if force == "bedtime":
+        hour = 22
+    elif force == "daily":
+        hour = 13
+    else:
+        hour = now.hour
     sent = 0
 
     for openid in _all_tasks:
@@ -885,7 +891,7 @@ def scheduled_push():
             if send_wx_message(openid, msg):
                 sent += 1
 
-    return {"sent_to": sent, "wx_errors": len(_all_tasks) - sent}
+    return {"sent_to": sent, "wx_errors": len(_all_tasks) - sent, "server_time": now.strftime("%H:%M"), "server_hour": hour}
 
 
 @app.route("/check-reminders", methods=["GET", "POST"])
