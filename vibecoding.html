@@ -1263,22 +1263,28 @@
 
     async function loadInitialData() {
         loadFromStorage();
+        // 优先从服务器拉取（微信添加的任务）
         try {
             const r = await fetch('/api/tasks');
             if (r.ok) {
                 const data = await r.json();
-                if (Array.isArray(data.tasks) && data.tasks.length > 0) {
+                if (Array.isArray(data.tasks)) {
                     const apiTasks = data.tasks.map(migrateTask);
                     const seen = new Set(apiTasks.map(t => t.id));
                     tasks = [...apiTasks, ...tasks.filter(t => !seen.has(t.id))];
+                    // 有服务器数据就同步到本地
+                    saveToLocalStorage();
                 }
             }
-        } catch (e) { /* API 不可用 */ }
-        if (tasks.length === 0) {
+        } catch (e) { /* API 不可用，用 localStorage 数据 */ }
+        // demo 数据只在首次且服务器无数据时加载一次
+        const demoLoaded = localStorage.getItem('vibe_demo_loaded');
+        if (tasks.length === 0 && !demoLoaded) {
             tasks = [
                 migrateTask({ id: 'demo1', label: '试用智能分类', category: '其他', priority: 1, notes: '试试输入"明早八点开会"或"下周五提交ipa"', reminders: [30], text: '试用智能分类', completed: false, createdAt: Date.now() }),
                 migrateTask({ id: 'demo2', label: '点击复选框标记完成', category: '生活琐事', priority: 2, notes: '完成的项会从建议排序中移除', reminders: [60], text: '点击复选框标记完成', completed: false, createdAt: Date.now() }),
             ];
+            localStorage.setItem('vibe_demo_loaded', '1');
         }
         renderAll();
     }
