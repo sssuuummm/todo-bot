@@ -10,6 +10,7 @@ import os
 import gzip
 import base64
 import struct
+import threading
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from flask import Flask, request, Response, send_from_directory
@@ -732,15 +733,17 @@ def wework():
 
         if msg_type == "text":
             content = msg_root.findtext("Content", "")
-            reply_text = handle_text_message(from_user, to_user, content)
-            # 被动回复：加密后直接返回
-            reply_xml = f"<xml><ToUserName><![CDATA[{from_user}]]></ToUserName><FromUserName><![CDATA[{to_user}]]></FromUserName><CreateTime>{int(time.time())}</CreateTime><MsgType><![CDATA[text]]></MsgType><Content><![CDATA[{reply_text}]]></Content></xml>"
-            enc = wework_crypto._encrypt(reply_xml)
-            sig_tmp = sorted([WEWORK_TOKEN, timestamp, nonce, enc])
-            sig = hashlib.sha1("".join(sig_tmp).encode()).hexdigest()
-            resp_xml = f"<xml><Encrypt><![CDATA[{enc}]]></Encrypt><MsgSignature><![CDATA[{sig}]]></MsgSignature><TimeStamp>{timestamp}</TimeStamp><Nonce><![CDATA[{nonce}]]></Nonce></xml>"
-            return Response(resp_xml, content_type="application/xml; charset=utf-8")
-        return "success"
+            # 异步处理：先秒回确认，后台处理完再推结果
+            def process_and_reply():
+                try:
+                    reply = handle_text_message(from_user, to_user, content)
+                    send_wework_message(from_user, reply)
+                except Exception as e:
+                    print(f"WeWork bg error: {e}")
+            threading.Thread(target=process_and_reply, daemon=True).start()
+            # 立即回复空串 = 不显示任何内容，等待后台推送
+            return ""
+        return ""
     except Exception as e:
         print(f"WeWork error: {e}")
         return str(e)
