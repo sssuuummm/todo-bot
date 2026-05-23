@@ -725,10 +725,10 @@ def wework():
             content = msg_root.findtext("Content", "")
             reply_text = handle_text_message(from_user, to_user, content)
             send_wework_message(from_user, reply_text)
-        return ""
+        return "success"
     except Exception as e:
         print(f"WeWork error: {e}")
-        return ""
+        return str(e)
 
 
 @app.route("/api/tasks", methods=["GET"])
