@@ -75,35 +75,27 @@ def get_all_tasks_flat() -> list:
 
 # ============= LLM 分析 =============
 
-SYSTEM_PROMPT = """你是一个智能日程分析助手。分析用户输入的口语化待办文本，完成以下任务：
+SYSTEM_PROMPT = """你是一个智能助手，同时具备日程管理和通用问答能力。
 
-1. 判断任务类型（taskType）：
-   - "deadline"：有明确截止时间/日期的任务
-   - "followup"：需要持续跟进、检查进度、等待结果的无明确DDL任务（如查看审批、跟进邮件回复、确认进展、留意通知等）
+首先判断用户输入的意图（intent）：
+- 如果用户是在安排、记录、描述一件待办事项或日程（有明确要做的事、可能有时间/日期、DDL、跟进需求），则 intent="task"
+- 如果用户是在提问、闲聊、咨询、求助、讨论话题，则 intent="chat"
 
-2. 判断类别（category，严格从下列选一）：
-   - 会议安排：会议、开会、碰头、讨论、视频、面试、约见、拜访、见面等
-   - 作业限期：作业、论文、essay、ddl、deadline、考试、课程、答辩等
-   - 信息提交：申请、提交材料、报名、注册、上传、审核、审批、盖章、填表、ipa等
-   - 生活琐事：购物、买菜、缴费、快递、维修、家务、取件、挂号等
-   - 其他：无法归入以上类别
+=== 当 intent="task" 时，返回以下 JSON： ===
+{"intent":"task","taskType":"deadline或followup","label":"简洁主标签5-12字","category":"会议安排|作业限期|信息提交|生活琐事|其他","priority":1-5,"notes":"用户原始输入","hasDateTime":true/false,"dateTime":"时间描述"或null,"isoTime":"ISO8601时间"或null,"reminders":[],"cleanTask":"去除时间后的纯任务文本"}
 
-3. 判断重要程度（priority 1-5），理解内容的内在价值：
-   - 有长期价值的个人项目（如"开发网站"）→ 3-4分
-   - 学业/工作硬性任务 → 4-5分
-   - 普通生活事务 → 2-3分
-   - 无长远价值的消遣 → 1-2分
+taskType: 有明确时间→"deadline"，需持续跟进无明确DDL→"followup"
+category: 开会/面试/约见→会议安排, 作业/论文/essay/ddl/考试→作业限期, 申请/提交/报名/审核/填表/ipa→信息提交, 购物/快递/缴费/维修→生活琐事
+priority 1-5: 理解内容的内在价值，学业工作硬性任务4-5，长期个人项目3-4，普通事务2-3，消遣1-2
 
-4. 提取简洁主标签 label（5-12字），用户原始输入写入 notes。
+=== 当 intent="chat" 时，返回以下 JSON： ===
+{"intent":"chat","reply":"你的回答内容"}
 
-5. 提取时间/日期信息。含精确时间则 hasDateTime=true，同时填 dateTime 和 isoTime。
-
-6. reminders 留空数组即可。
+reply 应简洁、有帮助，控制在200字以内。
 
 当前时间：{current_time}
 
-严格返回 JSON（不要包含其他任何文字）：
-{"taskType":"deadline或followup","label":"主标签","category":"类别","priority":1-5,"notes":"用户原始输入","hasDateTime":true/false,"dateTime":"时间描述"或null,"isoTime":"ISO8601绝对时间如2026-05-21T15:00:00+08:00"或null,"reminders":[],"cleanTask":"去除时间后的文本"}"""
+严格返回 JSON，不要包含其他任何文字。"""
 
 
 def analyze_with_llm(text: str) -> dict | None:
@@ -137,31 +129,6 @@ def analyze_with_llm(text: str) -> dict | None:
     except Exception as e:
         print(f"LLM error: {e}")
     return None
-
-
-def chat_with_llm(text: str) -> str | None:
-    """通用 AI 对话（一问一答，不涉及任务解析）"""
-    try:
-        resp = requests.post(
-            f"{LLM_CONFIG['base_url']}/v1/chat/completions",
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {LLM_CONFIG['api_key']}"},
-            json={
-                "model": LLM_CONFIG["model"],
-                "messages": [
-                    {"role": "system", "content": "你是一个有帮助的AI助手。简洁回答问题，控制在300字以内。"},
-                    {"role": "user", "content": text},
-                ],
-                "temperature": 0.7,
-                "max_tokens": 500,
-            },
-            timeout=20,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print(f"Chat error: {e}")
-        return None
 
 
 def compute_absolute_time(date_str: str) -> str | None:
@@ -353,29 +320,23 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
             f"https://todo-bot-0ly4.onrender.com"
         )
 
-    # ===== AI 闲聊/问答 =====
-    for prefix in ('问 ', 'ai ', 'AI ', '聊天 ', '问，', '问:', 'ai，', 'ai:'):
-        if msg.startswith(prefix):
-            question = msg[len(prefix):].strip()
-            if not question:
-                return reply_with_footer("请说完整的问题，如：问 怎么学Python")
-            answer = chat_with_llm(question)
-            if answer:
-                return reply_with_footer(answer)
-            return reply_with_footer("AI 暂时无法回复，请稍后再试")
-
-    # ===== AI 添加任务 =====
+    # ===== AI 统一处理（意图识别） =====
     result = analyze_with_llm(msg)
 
     if result is None:
         return reply_with_footer(
-            "抱歉，AI 暂时无法分析这条消息。\n\n"
-            "试一试这样说：\n"
-            "• 明天下午3点去301会议室开会\n"
-            "• 下周五前提交ipa申请\n"
-            "• 跟进一下审批进度\n\n"
+            "抱歉，AI 暂时无法处理。\n\n"
+            "可以试试：\n"
+            "• 明天下午3点开会\n"
+            "• 下周五提交ipa申请\n"
+            "• 问 Python怎么入门\n"
+            "• 帮我看看怎么学英语\n\n"
             "发送「帮助」查看所有命令"
         )
+
+    # 闲聊意图 → 直接回复
+    if result.get("intent") == "chat":
+        return reply_with_footer(result.get("reply", "抱歉，我没理解你的意思"))
 
     task_type = result.get("taskType", "deadline")
     category = result.get("category", "其他")
