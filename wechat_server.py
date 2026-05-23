@@ -598,13 +598,10 @@ def api_tasks():
     return {"tasks": tasks}
 
 
-@app.route("/api/add-task", methods=["POST"])
+@app.route("/api/add-task", methods=["GET", "POST"])
 def api_add_task():
-    """快捷指令专用：发送文本直接解析为任务（支持 JSON 和表单）"""
-    if request.is_json:
-        data = request.get_json(force=True, silent=True) or {}
-    else:
-        data = request.form
+    """快捷指令专用：GET 参数直接传"""
+    data = request.args if request.method == "GET" else (request.get_json(silent=True) or request.form or {})
     text = (data.get("text", "") or "").strip()
     openid = data.get("openid", "shortcuts_user")
     if not text:
