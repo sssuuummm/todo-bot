@@ -975,8 +975,8 @@
         const systemPrompt = `你是一个智能日程分析助手。分析用户输入的口语化待办文本，完成以下任务：
 
 1. 判断任务类型（taskType）：
-   - "deadline"：有明确截止时间/日期的任务
-   - "followup"：需要持续跟进、检查进度、等待结果的无明确DDL任务（如查看审批、跟进邮件回复、确认进展、留意通知等）
+   - "deadline"：一次性任务，有明确要做的事。含时间词（今晚/明早/下午/几点/周几）均=deadline。如"今晚吃中东菜""明天下午开会"都是deadline
+   - "followup"：需反复检查进度的任务，无明确结束时间。仅当明确涉及"跟进/查看进度/确认状态/等回复/留意"且无具体完成时间才标followup
 
 2. 判断类别（category，严格从下列选一）：
    - 会议安排：会议、开会、碰头、讨论、视频、面试、约见、拜访等
@@ -1097,6 +1097,10 @@
         if (md) { target.setMonth(parseInt(md[1]) - 1, parseInt(md[2])); if (target < now) target.setFullYear(target.getFullYear() + 1); }
         const time = parseTime(str);
         if (time) { target.setHours(time.hour, time.minute, 0, 0); }
+        else if (/(?:上午|早上|早|凌晨)/.test(str)) target.setHours(9, 0, 0, 0);
+        else if (/中午/.test(str)) target.setHours(11, 30, 0, 0);
+        else if (/(?:下午|傍晚)/.test(str)) target.setHours(13, 30, 0, 0);
+        else if (/(?:晚上|今晚|明晚)/.test(str)) target.setHours(18, 30, 0, 0);
         else {
             const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
             if (target.getTime() === todayStart.getTime()) return null;

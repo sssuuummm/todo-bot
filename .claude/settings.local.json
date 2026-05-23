@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import py_compile; py_compile.compile\\('wechat_server.py'\\); print\\('OK'\\)\")",
+      "Bash(git commit -m ' *)",
+      "Bash(python)",
+      "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -T git@github.com)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://todo-bot-0ly4.onrender.com/wechat)",
+      "Bash(curl -s https://todo-bot-0ly4.onrender.com/api/tasks)",
+      "Bash(curl -s -X POST https://todo-bot-0ly4.onrender.com/wechat -H 'Content-Type: application/xml' -d '<xml><ToUserName>gh_test</ToUserName><FromUserName>testuser</FromUserName><CreateTime>123456</CreateTime><MsgType>text</MsgType><Content>明天下午3点开会</Content></xml>')",
+      "Bash(curl -s -X POST https://todo-bot-0ly4.onrender.com/wechat -H \"Content-Type: application/xml\" -d '<xml><ToUserName>gh</ToUserName><FromUserName>test</FromUserName><CreateTime>123</CreateTime><MsgType>text</MsgType><Content>你好</Content></xml>')",
+      "Bash(curl -s -X GET https://todo-bot-0ly4.onrender.com/check-reminders)",
+      "Bash(curl -s -X POST https://todo-bot-0ly4.onrender.com/wechat -H \"Content-Type: application/xml\" -d '<xml><ToUserName>gh_test</ToUserName><FromUserName>ox_test</FromUserName><CreateTime>1</CreateTime><MsgType>text</MsgType><Content>你好</Content></xml>')",
+      "Bash(curl -s -X POST https://todo-bot-0ly4.onrender.com/wechat -H \"Content-Type: application/xml\" -d '<xml><ToUserName>gh_test</ToUserName><FromUserName>ox_test</FromUserName><CreateTime>1</CreateTime><MsgType>text</MsgType><Content>明天下午三点去301开会</Content></xml>')",
+      "Bash(curl -s -X POST https://todo-bot-0ly4.onrender.com/wechat -H \"Content-Type: application/xml\" -d '<xml><ToUserName>gh_test</ToUserName><FromUserName>ox_test</FromUserName><CreateTime>1</CreateTime><MsgType>text</MsgType><Content>下周五提交ipa申请</Content></xml>')",
+      "Bash(curl -s https://todo-bot-0ly4.onrender.com/)",
+      "Bash(node -e \"const fs = require\\('fs'\\); const html = fs.readFileSync\\('d:/vc/vibecoding.html', 'utf8'\\); const sm = html.match\\(/<script>\\([\\\\s\\\\S]*\\)<\\\\/script>/\\); if \\(sm\\) { try { new Function\\(sm[1]\\); console.log\\('JS OK'\\); } catch\\(e\\) { console.log\\('JS err:', e.message\\); } }\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('wechat_server.py'\\); print\\('Py OK'\\)\")"
+    ]
+  }
+}
