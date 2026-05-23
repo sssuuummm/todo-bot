@@ -228,7 +228,7 @@ def compute_quadrant(task: dict) -> str:
 load_all()  # 启动时加载已有数据
 
 SITE_URL = os.environ.get("SITE_URL", "https://todo-bot-0ly4.onrender.com")
-FOOTER = f"\n\n─────\n📊 {SITE_URL}\n发送「帮助」查看所有命令"
+FOOTER = f"\n\n📊 查看任务面板：\n{SITE_URL}\n\n发送「帮助」查看所有命令"
 
 
 def reply_with_footer(text: str) -> str:
