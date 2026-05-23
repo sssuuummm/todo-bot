@@ -706,7 +706,7 @@ def wework():
             return decrypted
         return "verification failed"
 
-    # POST: 接收消息
+    # POST: 接收消息（被动回复，不走 IP 白名单）
     try:
         raw = request.get_data()
         if len(raw) >= 2 and raw[:2] == b'\x1f\x8b':
@@ -724,7 +724,13 @@ def wework():
         if msg_type == "text":
             content = msg_root.findtext("Content", "")
             reply_text = handle_text_message(from_user, to_user, content)
-            send_wework_message(from_user, reply_text)
+            # 被动回复：加密后直接返回
+            reply_xml = f"<xml><ToUserName><![CDATA[{from_user}]]></ToUserName><FromUserName><![CDATA[{to_user}]]></FromUserName><CreateTime>{int(time.time())}</CreateTime><MsgType><![CDATA[text]]></MsgType><Content><![CDATA[{reply_text}]]></Content></xml>"
+            enc = wework_crypto._encrypt(reply_xml)
+            sig_tmp = sorted([WEWORK_TOKEN, timestamp, nonce, enc])
+            sig = hashlib.sha1("".join(sig_tmp).encode()).hexdigest()
+            resp_xml = f"<xml><Encrypt><![CDATA[{enc}]]></Encrypt><MsgSignature><![CDATA[{sig}]]></MsgSignature><TimeStamp>{timestamp}</TimeStamp><Nonce><![CDATA[{nonce}]]></Nonce></xml>"
+            return Response(resp_xml, content_type="application/xml; charset=utf-8")
         return "success"
     except Exception as e:
         print(f"WeWork error: {e}")
