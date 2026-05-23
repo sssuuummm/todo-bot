@@ -544,20 +544,17 @@ def wechat():
         return "verification failed"
 
     try:
-        raw = request.data
+        raw = request.get_data()
+        if not raw:
+            return "ok"
         # 微信可能发 gzip 压缩数据
-        if raw[:2] == b'\x1f\x8b':
-            raw = gzip.decompress(raw)
-        # 尝试多种编码
-        for enc in ('utf-8', 'gb2312', 'gbk', 'latin-1'):
+        if len(raw) >= 2 and raw[:2] == b'\x1f\x8b':
             try:
-                xml_data = raw.decode(enc)
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            xml_data = raw.decode('utf-8', errors='replace')
-        root = ET.fromstring(xml_data)
+                raw = gzip.decompress(raw)
+            except Exception:
+                pass
+        # 从 bytes 直接解析 XML
+        root = ET.fromstring(raw)
         msg_type = root.findtext("MsgType", "")
         from_user = root.findtext("FromUserName", "")
         to_user = root.findtext("ToUserName", "")
