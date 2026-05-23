@@ -836,6 +836,49 @@ def my_ip():
         return {"ip": request.remote_addr or "unknown"}
 
 
+@app.route("/scheduled-push", methods=["GET", "POST"])
+def scheduled_push():
+    """定时推送：13点推当日任务，22点推睡觉提醒"""
+    load_all()
+    now = datetime.now(TZ)
+    hour = now.hour
+    sent = 0
+
+    for openid in _all_tasks:
+        # 下午1点：推送当日任务
+        if hour == 13:
+            tasks = get_user_tasks(openid)
+            active = [t for t in tasks if not t.get("completed")]
+            if not active:
+                continue
+            lines = [f"📋 今日任务 {now.strftime('%m/%d')}：\n"]
+            for i, t in enumerate(active[:10]):
+                label = t.get("label") or t.get("text", "")
+                due = ""
+                if t.get("dueTimestamp"):
+                    d = safe_iso(t["dueTimestamp"])
+                    if d:
+                        diff_h = (d - now).total_seconds() / 3600
+                        if diff_h <= 0:
+                            due = " ⚠已过期"
+                        elif diff_h < 24:
+                            due = f" ⏰{int(diff_h)}h后"
+                        else:
+                            due = f" {d.strftime('%m/%d %H:%M')}"
+                lines.append(f"{i+1}. {label}{due}")
+            if len(active) > 10:
+                lines.append(f"...还有{len(active)-10}项")
+            send_wx_message(openid, "\n".join(lines))
+            sent += 1
+
+        # 晚上10点：提醒睡觉
+        elif hour == 22:
+            send_wx_message(openid, "🌙 夜深了，该休息了。\n\n放下手机，准备睡觉吧。明天的事交给明天的你。")
+            sent += 1
+
+    return {"sent_to": sent}
+
+
 @app.route("/check-reminders", methods=["GET", "POST"])
 def check_reminders():
     """定时提醒检查——由外部 cron 服务调用"""
