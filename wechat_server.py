@@ -875,17 +875,17 @@ def scheduled_push():
             ])
             prompt = f"现在是{now.strftime('%H:%M')}。用温暖鼓励的语气写一条50字以内的今日任务提醒。任务：\n{task_list}\n\n不要列清单，自然地说。参考语气：'下午好！今天有3件事等着你——最重要的是下午两点的会。加油，一件一件来。'"
             msg = chat_reply(prompt) or f"📋 今日 {len(active)} 项待办，加油！"
-            send_wx_message(openid, msg)
-            sent += 1
+            if send_wx_message(openid, msg):
+                sent += 1
 
         # 晚上10点：AI 写睡觉提醒
         elif hour == 22:
             prompt = "用温柔关心的语气写一条30字以内的睡前提醒。针对ADHD用户，不要命令式。每次内容都不同。"
             msg = chat_reply(prompt) or "🌙 夜深了，该休息了。放下手机，明天的事交给明天的你。"
-            send_wx_message(openid, msg)
-            sent += 1
+            if send_wx_message(openid, msg):
+                sent += 1
 
-    return {"sent_to": sent}
+    return {"sent_to": sent, "wx_errors": len(_all_tasks) - sent}
 
 
 @app.route("/check-reminders", methods=["GET", "POST"])
