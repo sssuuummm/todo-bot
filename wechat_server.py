@@ -14,7 +14,11 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from flask import Flask, request, Response, send_from_directory
 import requests
-from Crypto.Cipher import AES
+try:
+    from Crypto.Cipher import AES
+    HAS_CRYPTO = True
+except ImportError:
+    HAS_CRYPTO = False
 
 app = Flask(__name__)
 
@@ -589,8 +593,8 @@ class WeworkCrypto:
         return self._decrypt(encrypted)
 
 
-# 初始化企业微信加解密
-wework_crypto = WeworkCrypto(WEWORK_TOKEN, WEWORK_AES_KEY, WEWORK_CORP_ID)
+# 初始化企业微信加解密（需要 pycryptodome）
+wework_crypto = WeworkCrypto(WEWORK_TOKEN, WEWORK_AES_KEY, WEWORK_CORP_ID) if HAS_CRYPTO else None
 
 # 企业微信 access_token
 _wework_token_cache = {"token": "", "expires": 0}
@@ -694,6 +698,8 @@ def wechat():
 @app.route("/wework", methods=["GET", "POST"])
 def wework():
     """企业微信自建应用接收消息"""
+    if not wework_crypto:
+        return "crypto module not available", 500
     msg_signature = request.args.get("msg_signature", "")
     timestamp = request.args.get("timestamp", "")
     nonce = request.args.get("nonce", "")
