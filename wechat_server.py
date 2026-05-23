@@ -44,7 +44,7 @@ TASKS_FILE = "tasks.json"
 TZ = timezone(timedelta(hours=8))
 
 
-def safe_iso(s: str | None):
+def safe_iso(s):
     """安全解析 ISO 时间，失败返回 epoch"""
     if not s:
         return None
@@ -105,27 +105,22 @@ def get_all_tasks_flat() -> list:
 
 # ============= LLM 分析 =============
 
-SYSTEM_PROMPT = """你是一个智能助手，同时具备日程管理和通用问答能力。
+SYSTEM_PROMPT = """你是一个同时具备任务管理和聊天能力的助手。
 
-首先判断用户输入的意图（intent）：
-- 如果用户是在安排、记录、描述待办或日程（有要做的事/地点/时间/DDL/跟进），则 intent="task"。关键词如：开会、去、交、提交、做、写、买、取、完成、截止、ddl、房间号/会议室号都是任务信号
-- 如果用户是在提问知识、闲聊、咨询抽象话题（是什么、为什么、怎么学、推荐），则 intent="chat"
+先判断用户输入属于哪一类：
+- intent="task"：用户自己在安排要做的事，主语是"我"或隐含自己去做。比如"明天开会""下周五交报告""去超市买东西"。即使含时间词，也是给自己安排日程。
+- intent="chat"：用户在提问、求助、闲聊、让你帮忙做事、讨论话题。比如"帮我写论文""Python怎么学""推荐本书""你好"。**用户让你帮忙做某事=chat，不是task。**
 
-=== 当 intent="task" 时，返回以下 JSON： ===
-{"intent":"task","taskType":"deadline或followup","label":"简洁主标签5-12字","category":"会议安排|作业限期|信息提交|生活琐事|其他","priority":1-5,"notes":"用户原始输入","hasDateTime":true/false,"dateTime":"时间描述"或null,"isoTime":"ISO8601时间"或null,"reminders":[],"cleanTask":"去除时间后的纯任务文本"}
+=== intent="task" 时返回： ===
+{"intent":"task","taskType":"deadline","label":"5-12字标签","category":"会议安排|作业限期|信息提交|生活琐事|其他","priority":1-5,"notes":"用户原文","hasDateTime":true/false,"dateTime":"时间描述"或null,"isoTime":"ISO8601时间"或null,"reminders":[],"cleanTask":"去时间后的文本"}
 
-taskType: 有明确时间→"deadline"，需持续跟进无明确DDL→"followup"
-category: 开会/面试/约见→会议安排, 作业/论文/essay/ddl/考试→作业限期, 申请/提交/报名/审核/填表/ipa→信息提交, 购物/快递/缴费/维修→生活琐事
-priority 1-5: 理解内容的内在价值，学业工作硬性任务4-5，长期个人项目3-4，普通事务2-3，消遣1-2
+taskType规则：有要做的事+有时间点=deadline。只有明确含"跟进/查看进度/等回复/确认状态"且无结束时间才=followup。今晚/明早/下午/几点都是deadline。
 
-=== 当 intent="chat" 时，返回以下 JSON： ===
-{"intent":"chat","reply":"你的回答内容"}
-
-reply 应简洁、有帮助，控制在200字以内。
+=== intent="chat" 时返回： ===
+{"intent":"chat","reply":"你的回答，200字内，简洁有帮助"}
 
 当前时间：{current_time}
-
-严格返回 JSON，不要包含其他任何文字。"""
+只返回JSON，不说别的。"""
 
 
 def analyze_with_llm(text: str) -> dict | None:

@@ -974,9 +974,13 @@
         const nowStr = new Date().toLocaleString('zh-CN', { hour12: false });
         const systemPrompt = `你是一个智能日程分析助手。分析用户输入的口语化待办文本，完成以下任务：
 
-1. 判断任务类型（taskType）：
-   - "deadline"：一次性任务，有明确要做的事。含时间词（今晚/明早/下午/几点/周几）均=deadline。如"今晚吃中东菜""明天下午开会"都是deadline
-   - "followup"：需反复检查进度的任务，无明确结束时间。仅当明确涉及"跟进/查看进度/确认状态/等回复/留意"且无具体完成时间才标followup
+首先判断意图（intent）：
+- task：用户自己在安排要做的事（主语是"我"或隐含自己做）。含时间词=给自己的日程。
+- chat：提问、求助、闲聊、让你帮忙做事。"帮我写论文"=chat不是task。
+
+1. 当 intent="task" 时，判断 taskType：
+   - "deadline"：一次性任务，含时间词均=deadline
+   - "followup"：仅当明确含"跟进/查看进度/等回复"才标followup
 
 2. 判断类别（category，严格从下列选一）：
    - 会议安排：会议、开会、碰头、讨论、视频、面试、约见、拜访等
@@ -1000,7 +1004,7 @@
 当前时间：${nowStr}
 
 严格返回JSON（不要包含任何其他文字）：
-{"taskType":"deadline或followup","label":"主标签","category":"类别","priority":1-5,"notes":"用户原始输入","hasDateTime":true/false,"dateTime":"时间描述"或null,"isoTime":"ISO8601绝对时间如2026-05-21T15:00:00+08:00"或null,"reminders":[],"cleanTask":"去除时间后的文本"}`;
+{"intent":"task或chat","taskType":"deadline或followup","label":"主标签","category":"类别","priority":1-5,"notes":"用户原始输入","hasDateTime":true/false,"dateTime":"时间描述"或null,"isoTime":"ISO8601绝对时间"或null,"reminders":[],"cleanTask":"去除时间后的文本","reply":"如果是chat则填回复内容"}`;
 
         try {
             const r = await fetch(`${LLM_CONFIG.baseUrl}/v1/chat/completions`, {
