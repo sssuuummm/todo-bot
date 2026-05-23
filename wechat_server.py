@@ -8,15 +8,25 @@ import time
 import re
 import os
 import gzip
+import base64
+import struct
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from flask import Flask, request, Response, send_from_directory
 import requests
+from Crypto.Cipher import AES
 
 app = Flask(__name__)
 
 # ============= 配置 =============
 WECHAT_TOKEN = os.environ.get("WECHAT_TOKEN", "your_wechat_token_here")
+
+# 企业微信配置
+WEWORK_CORP_ID = os.environ.get("WEWORK_CORP_ID", "wwca37750211c7f64c")
+WEWORK_TOKEN = os.environ.get("WEWORK_TOKEN", "pF61CT3fSmV6t4bY")
+WEWORK_AES_KEY = os.environ.get("WEWORK_AES_KEY", "clUIB1tVpc3dRnZETPOR6JoFesfiPYbOYSvlBd69NDw")
+WEWORK_AGENT_ID = os.environ.get("WEWORK_AGENT_ID", "1000002")
+WEWORK_SECRET = os.environ.get("WEWORK_SECRET", "yEIAUEESIvCi_0Z-L0axTrNAfAghr8cP8sFkUoTTQPY")
 
 LLM_CONFIG = {
     "base_url": "https://api.deepseek.com",
@@ -532,6 +542,101 @@ def check_and_send_reminders() -> dict:
     return {"reminders_sent": sent_count, "users_checked": len(_all_tasks)}
 
 
+# ============= 企业微信加解密工具 =============
+
+class WeworkCrypto:
+    """企业微信消息加解密"""
+
+    def __init__(self, token, aes_key, corp_id):
+        self.token = token
+        self.corp_id = corp_id.encode()
+        self.key = base64.b64decode(aes_key + "=")
+
+    def _pad(self, s: bytes, n: int = 32) -> bytes:
+        pad = n - len(s) % n
+        return s + bytes([pad] * pad)
+
+    def _unpad(self, s: bytes) -> bytes:
+        return s[:-s[-1]]
+
+    def _encrypt(self, text: str) -> str:
+        raw = (text.encode() + self.corp_id)
+        import random
+        raw = bytes([random.randint(0, 255) for _ in range(16)]) + \
+            struct.pack("!I", len(text.encode())) + raw
+        raw = self._pad(raw)
+        iv = self.key[:16]
+        cipher = AES.new(self.key, AES.MODE_CBC, iv)
+        return base64.b64encode(cipher.encrypt(raw)).decode()
+
+    def _decrypt(self, encrypted: str) -> str:
+        data = base64.b64decode(encrypted)
+        iv = self.key[:16]
+        cipher = AES.new(self.key, AES.MODE_CBC, iv)
+        raw = cipher.decrypt(data)
+        raw = self._unpad(raw)
+        content_len = struct.unpack("!I", raw[16:20])[0]
+        content = raw[20:20 + content_len].decode()
+        return content
+
+    def verify_signature(self, signature, timestamp, nonce, echostr):
+        tmp = sorted([self.token, timestamp, nonce, echostr])
+        return hashlib.sha1("".join(tmp).encode()).hexdigest() == signature
+
+    def decrypt_msg(self, signature, timestamp, nonce, encrypted):
+        if not self.verify_signature(signature, timestamp, nonce, encrypted):
+            return None
+        return self._decrypt(encrypted)
+
+
+# 初始化企业微信加解密
+wework_crypto = WeworkCrypto(WEWORK_TOKEN, WEWORK_AES_KEY, WEWORK_CORP_ID)
+
+# 企业微信 access_token
+_wework_token_cache = {"token": "", "expires": 0}
+
+
+def get_wework_token() -> str:
+    now = time.time()
+    if _wework_token_cache["token"] and _wework_token_cache["expires"] > now + 300:
+        return _wework_token_cache["token"]
+    try:
+        r = requests.get(
+            "https://qyapi.weixin.qq.com/cgi-bin/gettoken",
+            params={"corpid": WEWORK_CORP_ID, "corpsecret": WEWORK_SECRET},
+            timeout=10,
+        )
+        data = r.json()
+        _wework_token_cache["token"] = data.get("access_token", "")
+        _wework_token_cache["expires"] = now + data.get("expires_in", 7200)
+        return _wework_token_cache["token"]
+    except Exception as e:
+        print(f"WeWork token error: {e}")
+        return ""
+
+
+def send_wework_message(userid: str, text: str) -> bool:
+    """发送企业微信消息给指定用户"""
+    token = get_wework_token()
+    if not token:
+        return False
+    try:
+        r = requests.post(
+            f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}",
+            json={
+                "touser": userid,
+                "msgtype": "text",
+                "agentid": WEWORK_AGENT_ID,
+                "text": {"content": text},
+            },
+            timeout=10,
+        )
+        return r.json().get("errcode") == 0
+    except Exception as e:
+        print(f"WeWork send fail: {e}")
+        return False
+
+
 # ============= Flask 路由 =============
 
 @app.route("/wechat", methods=["GET", "POST"])
@@ -584,6 +689,46 @@ def wechat():
         f"</xml>"
     )
     return Response(reply_xml, content_type="application/xml; charset=utf-8")
+
+
+@app.route("/wework", methods=["GET", "POST"])
+def wework():
+    """企业微信自建应用接收消息"""
+    msg_signature = request.args.get("msg_signature", "")
+    timestamp = request.args.get("timestamp", "")
+    nonce = request.args.get("nonce", "")
+
+    if request.method == "GET":
+        # 验证回调 URL
+        echostr = request.args.get("echostr", "")
+        decrypted = wework_crypto.decrypt_msg(msg_signature, timestamp, nonce, echostr)
+        if decrypted:
+            return decrypted
+        return "verification failed"
+
+    # POST: 接收消息
+    try:
+        raw = request.get_data()
+        if len(raw) >= 2 and raw[:2] == b'\x1f\x8b':
+            raw = gzip.decompress(raw)
+        root = ET.fromstring(raw)
+        encrypted = root.findtext("Encrypt", "")
+        xml_data = wework_crypto.decrypt_msg(msg_signature, timestamp, nonce, encrypted)
+        if not xml_data:
+            return "decrypt failed"
+        msg_root = ET.fromstring(xml_data)
+        msg_type = msg_root.findtext("MsgType", "")
+        from_user = msg_root.findtext("FromUserName", "")
+        to_user = msg_root.findtext("ToUserName", "")
+
+        if msg_type == "text":
+            content = msg_root.findtext("Content", "")
+            reply_text = handle_text_message(from_user, to_user, content)
+            send_wework_message(from_user, reply_text)
+        return ""
+    except Exception as e:
+        print(f"WeWork error: {e}")
+        return ""
 
 
 @app.route("/api/tasks", methods=["GET"])
