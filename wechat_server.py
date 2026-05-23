@@ -316,9 +316,21 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
             f"🏠 生活：提前 {DEFAULT_REMINDERS['生活琐事']} 分钟\n"
             f"🎮 休闲：无提醒\n"
             f"🔄 跟进间隔：每5天\n\n"
-            "📊 打开网页查看四象限视图：\n"
-            f"https://todo-bot-0ly4.onrender.com"
+            "📅 日历订阅链接（iOS设置→日历→账户→添加订阅）：\n"
+            f"{SITE_URL}/api/tasks.ics"
         )
+
+    # 报告
+    if msg in ('周报', 'weekly'):
+        record_daily_stats()
+        report = generate_report("weekly")
+        return reply_with_footer(report)
+    if msg in ('月报', 'monthly'):
+        record_daily_stats()
+        report = generate_report("monthly")
+        return reply_with_footer(report)
+    if msg in ('报告', 'report'):
+        return reply_with_footer("发送「周报」或「月报」生成分析报告\n\n📅 订阅日历：\n" + SITE_URL + "/api/tasks.ics")
 
     # ===== AI 统一处理（意图识别） =====
     result = analyze_with_llm(msg)
@@ -585,6 +597,149 @@ def api_settings():
         with open(settings_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return {"ok": True}
+
+
+@app.route("/api/tasks.ics")
+def tasks_ics():
+    """日历订阅：返回 iCalendar 格式，iOS/安卓可直接订阅"""
+    load_all()
+    now = datetime.now(TZ)
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//TodoBot//CN",
+        "X-WR-CALNAME:任务四象限",
+    ]
+    for uid, tasks in _all_tasks.items():
+        for t in tasks:
+            if t.get("completed") or not t.get("dueTimestamp"):
+                continue
+            due = datetime.fromisoformat(t["dueTimestamp"])
+            label = t.get("label") or t.get("text", "")
+            cat = t.get("category", "")
+            lines.extend([
+                "BEGIN:VEVENT",
+                f"UID:{t['id']}",
+                f"DTSTART:{due.strftime('%Y%m%dT%H%M%S')}",
+                f"DTEND:{due.strftime('%Y%m%dT%H%M%S')}",
+                f"SUMMARY:{label} [{cat}]",
+                f"DESCRIPTION:{t.get('notes', label)}",
+                "END:VEVENT",
+            ])
+    lines.append("END:VCALENDAR")
+    return Response("\n".join(lines), content_type="text/calendar; charset=utf-8")
+
+
+# ============= 每日统计 & 报告 =============
+
+STATS_FILE = "daily_stats.json"
+
+
+def record_daily_stats():
+    """记录当天任务快照"""
+    load_all()
+    today = datetime.now(TZ).strftime("%Y-%m-%d")
+    try:
+        with open(STATS_FILE, "r", encoding="utf-8") as f:
+            stats = json.load(f)
+    except Exception:
+        stats = {}
+
+    if today in stats:
+        return  # 今天已记录
+
+    all_tasks = get_all_tasks_flat()
+    active = [t for t in all_tasks if not t.get("completed")]
+    done = [t for t in all_tasks if t.get("completed")]
+    cats = {}
+    quads = {}
+    for t in active:
+        c = t.get("category", "其他")
+        cats[c] = cats.get(c, 0) + 1
+        q = compute_quadrant(t)
+        quads[q] = quads.get(q, 0) + 1
+
+    stats[today] = {
+        "total_active": len(active),
+        "total_done": len(done),
+        "by_category": cats,
+        "by_quadrant": quads,
+        "users": len(_all_tasks),
+    }
+    with open(STATS_FILE, "w", encoding="utf-8") as f:
+        json.dump(stats, f, ensure_ascii=False, indent=2)
+
+
+def get_period_stats(days: int) -> dict:
+    """获取最近 N 天的统计数据"""
+    record_daily_stats()
+    try:
+        with open(STATS_FILE, "r", encoding="utf-8") as f:
+            stats = json.load(f)
+    except Exception:
+        stats = {}
+
+    cutoff = (datetime.now(TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
+    recent = {k: v for k, v in stats.items() if k >= cutoff}
+
+    load_all()
+    all_tasks = get_all_tasks_flat()
+    active = [t for t in all_tasks if not t.get("completed")]
+    done_recent = [t for t in all_tasks if t.get("completed") and t.get("completedAt", "") >= cutoff]
+
+    return {
+        "days": len(recent),
+        "daily_snapshots": recent,
+        "currently_active": len(active),
+        "completed_in_period": len(done_recent),
+        "active_by_quadrant": {q: len([t for t in active if compute_quadrant(t) == q]) for q in ["救火区", "投资区", "干扰区", "黑洞区"]},
+    }
+
+
+def generate_report(period: str) -> str:
+    """生成周报/月报"""
+    days = 7 if period == "weekly" else 30
+    label = "周报" if period == "weekly" else "月报"
+    stats = get_period_stats(days)
+
+    prompt = f"""你是一个时间管理教练。根据用户过去{days}天的任务数据，生成一份简洁的{label}。
+
+数据：
+- 当前活跃任务：{stats['currently_active']} 项
+- {label}内完成：{stats['completed_in_period']} 项
+- 各象限分布：{stats['active_by_quadrant']}
+
+请用以下格式回复（控制在400字内）：
+
+📊 {label}总结
+✅ 完成情况：（一句话评价）
+🔍 问题发现：（1-2个关键问题）
+💡 建议：（1-2条可执行的改进建议）
+📈 趋势：（简短）
+
+语气友善鼓励，面向ADHD用户。"""
+
+    try:
+        resp = requests.post(
+            f"{LLM_CONFIG['base_url']}/v1/chat/completions",
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {LLM_CONFIG['api_key']}"},
+            json={"model": LLM_CONFIG["model"], "messages": [{"role": "user", "content": prompt}], "temperature": 0.7, "max_tokens": 500},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        print(f"Report error: {e}")
+        return f"📊 {label}\n\n当前活跃：{stats['currently_active']} 项\n本周完成：{stats['completed_in_period']} 项\n继续加油！"
+
+
+@app.route("/api/report", methods=["GET"])
+def api_report():
+    period = request.args.get("period", "weekly")
+    if period not in ("weekly", "monthly"):
+        period = "weekly"
+    report = generate_report(period)
+    return {"period": period, "report": report, "stats": get_period_stats(7 if period == "weekly" else 30)}
 
 
 @app.route("/")
