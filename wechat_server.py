@@ -139,6 +139,31 @@ def analyze_with_llm(text: str) -> dict | None:
     return None
 
 
+def chat_with_llm(text: str) -> str | None:
+    """通用 AI 对话（一问一答，不涉及任务解析）"""
+    try:
+        resp = requests.post(
+            f"{LLM_CONFIG['base_url']}/v1/chat/completions",
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {LLM_CONFIG['api_key']}"},
+            json={
+                "model": LLM_CONFIG["model"],
+                "messages": [
+                    {"role": "system", "content": "你是一个有帮助的AI助手。简洁回答问题，控制在300字以内。"},
+                    {"role": "user", "content": text},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 500,
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        print(f"Chat error: {e}")
+        return None
+
+
 def compute_absolute_time(date_str: str) -> str | None:
     now = datetime.now(TZ)
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -327,6 +352,17 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
             "📊 打开网页查看四象限视图：\n"
             f"https://todo-bot-0ly4.onrender.com"
         )
+
+    # ===== AI 闲聊/问答 =====
+    for prefix in ('问 ', 'ai ', 'AI ', '聊天 ', '问，', '问:', 'ai，', 'ai:'):
+        if msg.startswith(prefix):
+            question = msg[len(prefix):].strip()
+            if not question:
+                return reply_with_footer("请说完整的问题，如：问 怎么学Python")
+            answer = chat_with_llm(question)
+            if answer:
+                return reply_with_footer(answer)
+            return reply_with_footer("AI 暂时无法回复，请稍后再试")
 
     # ===== AI 添加任务 =====
     result = analyze_with_llm(msg)
