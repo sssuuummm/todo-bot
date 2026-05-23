@@ -43,12 +43,15 @@ _all_tasks: dict[str, list] = {}  # {openid: [task, ...]}
 def load_all() -> dict:
     global _all_tasks
     if os.path.exists(TASKS_FILE):
-        with open(TASKS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        try:
+            with open(TASKS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
             _all_tasks = data.get("user_tasks", {})
             if isinstance(data, list):
                 _all_tasks = {"_legacy_": data}
                 save_all()
+        except Exception:
+            _all_tasks = {}
     return _all_tasks
 
 
