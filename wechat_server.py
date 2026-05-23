@@ -515,9 +515,11 @@ def send_wx_message(openid: str, text: str) -> bool:
     if not token or not openid:
         return False
     try:
+        body = json.dumps({"touser": openid, "msgtype": "text", "text": {"content": text}}, ensure_ascii=False)
         r = requests.post(
             f"https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token={token}",
-            json={"touser": openid, "msgtype": "text", "text": {"content": text}},
+            data=body.encode('utf-8'),
+            headers={"Content-Type": "application/json; charset=utf-8"},
             timeout=10,
         )
         return r.json().get("errcode") == 0
@@ -661,14 +663,14 @@ def send_wework_message(userid: str, text: str) -> bool:
     if not token:
         return False
     try:
+        body = json.dumps({
+            "touser": userid, "msgtype": "text",
+            "agentid": WEWORK_AGENT_ID, "text": {"content": text},
+        }, ensure_ascii=False)
         r = requests.post(
             f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}",
-            json={
-                "touser": userid,
-                "msgtype": "text",
-                "agentid": WEWORK_AGENT_ID,
-                "text": {"content": text},
-            },
+            data=body.encode('utf-8'),
+            headers={"Content-Type": "application/json; charset=utf-8"},
             timeout=10,
         )
         return r.json().get("errcode") == 0
