@@ -43,6 +43,16 @@ LLM_CONFIG = {
 TASKS_FILE = "tasks.json"
 TZ = timezone(timedelta(hours=8))
 
+
+def safe_iso(s: str | None):
+    """安全解析 ISO 时间，失败返回 epoch"""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return datetime(2000, 1, 1, tzinfo=TZ)
+
 # 默认提醒规则（分钟）
 DEFAULT_REMINDERS = {
     "作业限期": [10080, 4320],   # 7天, 3天
@@ -216,27 +226,36 @@ def is_important_category(cat: str) -> bool:
 
 def compute_quadrant(task: dict) -> str:
     """返回：救火区 / 投资区 / 干扰区 / 黑洞区"""
-    important = is_important_category(task.get("category", "其他")) or task.get("priority", 1) >= 4
-    urgent = False
-    now = datetime.now(TZ)
-
-    if task.get("taskType") == "followup" and task.get("nextCheckTime"):
-        nc = datetime.fromisoformat(task["nextCheckTime"])
-        if nc <= now:
-            urgent = True
-    elif task.get("dueTimestamp"):
-        due = datetime.fromisoformat(task["dueTimestamp"])
-        diff_h = (due - now).total_seconds() / 3600
-        if diff_h <= 4:
-            urgent = True
-
-    if task.get("category") == "其他" and task.get("priority", 1) <= 1:
+    try:
+        important = is_important_category(task.get("category", "其他")) or task.get("priority", 1) >= 4
         urgent = False
+        now = datetime.now(TZ)
 
-    if important and urgent: return "救火区"
-    elif important and not urgent: return "投资区"
-    elif not important and urgent: return "干扰区"
-    else: return "黑洞区"
+        if task.get("taskType") == "followup" and task.get("nextCheckTime"):
+            try:
+                nc = safe_iso(task["nextCheckTime"])
+                if nc <= now:
+                    urgent = True
+            except ValueError:
+                pass
+        elif task.get("dueTimestamp"):
+            try:
+                due = safe_iso(task["dueTimestamp"])
+                diff_h = (due - now).total_seconds() / 3600
+                if diff_h <= 4:
+                    urgent = True
+            except ValueError:
+                pass
+
+        if task.get("category") == "其他" and task.get("priority", 1) <= 1:
+            urgent = False
+
+        if important and urgent: return "救火区"
+        elif important and not urgent: return "投资区"
+        elif not important and urgent: return "干扰区"
+        else: return "黑洞区"
+    except Exception:
+        return "黑洞区"
 
 
 # ============= 微信消息处理 =============
@@ -282,10 +301,10 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
             qe = {"救火区": "🔥", "投资区": "💎", "干扰区": "⚡", "黑洞区": "🕳"}
             due_str = ''
             if t.get('taskType') == 'followup' and t.get('nextCheckTime'):
-                nc = datetime.fromisoformat(t['nextCheckTime']).astimezone(TZ)
+                nc = safe_iso(t['nextCheckTime']).astimezone(TZ)
                 due_str = f" | 检查 {nc.strftime('%m/%d %H:%M')}"
             elif t.get('dueTimestamp'):
-                d = datetime.fromisoformat(t['dueTimestamp']).astimezone(TZ)
+                d = safe_iso(t['dueTimestamp']).astimezone(TZ)
                 due_str = f" | {d.strftime('%m/%d %H:%M')}"
             lines.append(f"{i+1}. {qe.get(quad,'')} {label}  [{cat}]{due_str}")
         if len(active) > 15:
@@ -425,10 +444,10 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
     reply += f"{quad_emoji.get(quad, '')} {quad}\n"
 
     if task_type == "followup":
-        nc = datetime.fromisoformat(task["nextCheckTime"]).astimezone(TZ)
+        nc = safe_iso(task["nextCheckTime"]).astimezone(TZ)
         reply += f"🔄 下次检查：{nc.strftime('%m月%d日 %H:%M')}\n"
     elif task.get("dueTimestamp"):
-        due_dt = datetime.fromisoformat(task["dueTimestamp"]).astimezone(TZ)
+        due_dt = safe_iso(task["dueTimestamp"]).astimezone(TZ)
         reply += f"⏰ {due_dt.strftime('%m月%d日 %H:%M')}"
         diff = due_dt - now
         hours_left = diff.total_seconds() / 3600
@@ -518,7 +537,7 @@ def check_and_send_reminders() -> dict:
 
             # 跟进任务：检查时间到了就提醒
             if t.get("taskType") == "followup" and t.get("nextCheckTime"):
-                nc = datetime.fromisoformat(t["nextCheckTime"])
+                nc = safe_iso(t["nextCheckTime"])
                 if nc <= now and "check" not in sent:
                     label = t.get("label") or t.get("text", "")
                     send_wx_message(openid, f"🔍 跟进提醒\n\n「{label}」到检查时间了\n请在方便时处理并回复「完成 {label}」")
@@ -531,7 +550,7 @@ def check_and_send_reminders() -> dict:
             if not t.get("dueTimestamp"):
                 continue
 
-            due = datetime.fromisoformat(t["dueTimestamp"])
+            due = safe_iso(t["dueTimestamp"])
             for r in reminders:
                 remind_time = due - timedelta(minutes=r)
                 if remind_time <= now < remind_time + timedelta(minutes=30):
@@ -826,7 +845,7 @@ def tasks_ics():
         for t in tasks:
             if t.get("completed") or not t.get("dueTimestamp"):
                 continue
-            due = datetime.fromisoformat(t["dueTimestamp"])
+            due = safe_iso(t["dueTimestamp"])
             label = t.get("label") or t.get("text", "")
             cat = t.get("category", "")
             lines.extend([
