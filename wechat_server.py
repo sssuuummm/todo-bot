@@ -539,17 +539,22 @@ def wechat():
             return echostr
         return "verification failed"
 
-    xml_data = request.data.decode("utf-8")
-    root = ET.fromstring(xml_data)
-    msg_type = root.findtext("MsgType", "")
-    from_user = root.findtext("FromUserName", "")
-    to_user = root.findtext("ToUserName", "")
+    try:
+        xml_data = request.data.decode("utf-8")
+        root = ET.fromstring(xml_data)
+        msg_type = root.findtext("MsgType", "")
+        from_user = root.findtext("FromUserName", "")
+        to_user = root.findtext("ToUserName", "")
 
-    if msg_type == "text":
-        content = root.findtext("Content", "")
-        reply_text = handle_text_message(from_user, to_user, content)
-    else:
-        reply_text = "暂不支持此消息类型，请发送文字描述你的待办事项～"
+        if msg_type == "text":
+            content = root.findtext("Content", "")
+            reply_text = handle_text_message(from_user, to_user, content)
+        else:
+            reply_text = "暂不支持此消息类型，请发送文字描述你的待办事项～"
+    except Exception as e:
+        reply_text = f"处理出错：{e}"
+        from_user = ""
+        to_user = ""
 
     reply_xml = (
         f"<xml>"
