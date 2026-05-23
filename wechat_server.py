@@ -35,18 +35,42 @@ DEFAULT_REMINDERS = {
     "其他": [],
 }
 
-# ============= 任务存储 =============
+# ============= 任务存储（按用户 OpenID 隔离） =============
 
-def load_tasks():
+_all_tasks: dict[str, list] = {}  # {openid: [task, ...]}
+
+
+def load_all() -> dict:
+    global _all_tasks
     if os.path.exists(TASKS_FILE):
         with open(TASKS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+            data = json.load(f)
+            _all_tasks = data.get("user_tasks", {})
+            if isinstance(data, list):
+                _all_tasks = {"_legacy_": data}
+                save_all()
+    return _all_tasks
 
 
-def save_tasks(tasks):
+def save_all():
     with open(TASKS_FILE, "w", encoding="utf-8") as f:
-        json.dump(tasks, f, ensure_ascii=False, indent=2)
+        json.dump({"user_tasks": _all_tasks}, f, ensure_ascii=False, indent=2)
+
+
+def get_user_tasks(openid: str) -> list:
+    if openid not in _all_tasks:
+        _all_tasks[openid] = []
+    return _all_tasks[openid]
+
+
+def get_all_tasks_flat() -> list:
+    result = []
+    for uid, tasks in _all_tasks.items():
+        for t in tasks:
+            t_copy = dict(t)
+            t_copy["_user"] = uid[:10] + ".."
+            result.append(t_copy)
+    return result
 
 
 # ============= LLM 分析 =============
@@ -205,6 +229,8 @@ def compute_quadrant(task: dict) -> str:
 
 # ============= 微信消息处理 =============
 
+load_all()  # 启动时加载已有数据
+
 SITE_URL = os.environ.get("SITE_URL", "https://todo-bot-0ly4.onrender.com")
 FOOTER = f"\n\n─────\n📊 {SITE_URL}\n发送「帮助」查看所有命令"
 
@@ -215,7 +241,7 @@ def reply_with_footer(text: str) -> str:
 
 def handle_text_message(from_user: str, to_user: str, content: str) -> str:
     msg = content.strip()
-    tasks = load_tasks()
+    tasks = get_user_tasks(from_user)
     now = datetime.now(TZ)
 
     # ===== 命令处理 =====
@@ -268,7 +294,7 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
             if found:
                 found['completed'] = True
                 found['completedAt'] = now.isoformat()
-                save_tasks(tasks)
+                save_all()
                 return reply_with_footer(f"✅ 已完成：{found.get('label') or found.get('text')}")
             return reply_with_footer(f"未找到匹配的未完成任务：「{keyword}」")
 
@@ -285,7 +311,7 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
                     found = t; break
             if found:
                 tasks.remove(found)
-                save_tasks(tasks)
+                save_all()
                 return reply_with_footer(f"🗑 已删除：{found.get('label') or found.get('text')}")
             return reply_with_footer(f"未找到匹配的任务：「{keyword}」")
 
@@ -348,9 +374,9 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
         "source": "wechat",
     }
 
-    tasks = load_tasks()
+    tasks = get_user_tasks(from_user)
     tasks.append(task)
-    save_tasks(tasks)
+    save_all()
 
     # 计算象限
     quad = compute_quadrant(task)
@@ -394,6 +420,101 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
     return reply_with_footer(reply)
 
 
+# ============= 微信主动推送 & 提醒检查 =============
+
+WX_APP_ID = os.environ.get("WX_APP_ID", "")
+WX_APP_SECRET = os.environ.get("WX_APP_SECRET", "")
+_wx_token: dict = {"token": "", "expires": 0}
+
+
+def get_wx_access_token() -> str:
+    """获取微信 access_token，缓存到过期"""
+    now = time.time()
+    if _wx_token["token"] and _wx_token["expires"] > now + 300:
+        return _wx_token["token"]
+    try:
+        r = requests.get(
+            "https://api.weixin.qq.com/cgi-bin/token",
+            params={"grant_type": "client_credential", "appid": WX_APP_ID, "secret": WX_APP_SECRET},
+            timeout=10,
+        )
+        data = r.json()
+        _wx_token["token"] = data.get("access_token", "")
+        _wx_token["expires"] = now + data.get("expires_in", 7200)
+        return _wx_token["token"]
+    except Exception as e:
+        print(f"WX token error: {e}")
+        return ""
+
+
+def send_wx_message(openid: str, text: str) -> bool:
+    """主动发送客服消息给用户"""
+    token = get_wx_access_token()
+    if not token or not openid:
+        return False
+    try:
+        r = requests.post(
+            f"https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token={token}",
+            json={"touser": openid, "msgtype": "text", "text": {"content": text}},
+            timeout=10,
+        )
+        return r.json().get("errcode") == 0
+    except Exception as e:
+        print(f"Send fail: {e}")
+        return False
+
+
+def check_and_send_reminders() -> dict:
+    """检查所有任务，对触发提醒的发送消息，返回发送统计"""
+    load_all()
+    now = datetime.now(TZ)
+    sent_count = 0
+
+    for openid, tasks in _all_tasks.items():
+        for t in tasks:
+            if t.get("completed"):
+                continue
+
+            # 跳过没有设置提醒的
+            reminders = t.get("reminders", [])
+            if not reminders and t.get("taskType") != "followup":
+                continue
+
+            # 已发送过的提醒不再重复
+            sent = set(t.get("_reminded", []))
+
+            # 跟进任务：检查时间到了就提醒
+            if t.get("taskType") == "followup" and t.get("nextCheckTime"):
+                nc = datetime.fromisoformat(t["nextCheckTime"])
+                if nc <= now and "check" not in sent:
+                    label = t.get("label") or t.get("text", "")
+                    send_wx_message(openid, f"🔍 跟进提醒\n\n「{label}」到检查时间了\n请在方便时处理并回复「完成 {label}」")
+                    sent.add("check")
+                    t["_reminded"] = list(sent)
+                    sent_count += 1
+                continue
+
+            # DDL 任务：按提醒时间检查
+            if not t.get("dueTimestamp"):
+                continue
+
+            due = datetime.fromisoformat(t["dueTimestamp"])
+            for r in reminders:
+                remind_time = due - timedelta(minutes=r)
+                if remind_time <= now < remind_time + timedelta(minutes=30):
+                    if str(r) not in sent:
+                        label = t.get("label") or t.get("text", "")
+                        when = f"{r // 10080}周前" if r >= 10080 else f"{r // 1440}天前" if r >= 1440 else f"{r // 60}小时前" if r >= 60 else f"{r}分钟前"
+                        send_wx_message(openid, f"⏰ 日程提醒\n\n「{label}」{when}到期\n截止时间：{due.strftime('%m月%d日 %H:%M')}")
+                        sent.add(str(r))
+                        t["_reminded"] = list(sent)
+                        sent_count += 1
+
+    if sent_count > 0:
+        save_all()
+    return {"reminders_sent": sent_count, "users_checked": len(_all_tasks)}
+
+
 # ============= Flask 路由 =============
 
 @app.route("/wechat", methods=["GET", "POST"])
@@ -435,7 +556,7 @@ def wechat():
 
 @app.route("/api/tasks", methods=["GET"])
 def api_tasks():
-    tasks = load_tasks()
+    tasks = get_all_tasks_flat()
     # 按象限排序
     def sort_key(t):
         quad_order = {"救火区": 0, "投资区": 1, "干扰区": 2, "黑洞区": 3}
@@ -443,6 +564,13 @@ def api_tasks():
         return quad_order.get(q, 3) * 1000 - (t.get("priority", 1) * 100)
     tasks.sort(key=sort_key)
     return {"tasks": tasks}
+
+
+@app.route("/check-reminders", methods=["GET", "POST"])
+def check_reminders():
+    """定时提醒检查——由外部 cron 服务调用"""
+    result = check_and_send_reminders()
+    return result
 
 
 @app.route("/api/settings", methods=["GET", "PUT"])
