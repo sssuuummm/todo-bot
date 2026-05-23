@@ -311,6 +311,10 @@ def handle_text_message(from_user: str, to_user: str, content: str) -> str:
                 return reply_with_footer(f"🗑 已删除：{found.get('label') or found.get('text')}")
             return reply_with_footer(f"未找到匹配的任务：「{keyword}」")
 
+    # 查 OpenID
+    if msg in ('whoami', 'id'):
+        return reply_with_footer(f"你的 OpenID：{from_user}")
+
     # 设置
     if msg in ('设置', 'settings', 'config'):
         return reply_with_footer(
@@ -596,9 +600,12 @@ def api_tasks():
 
 @app.route("/api/add-task", methods=["POST"])
 def api_add_task():
-    """快捷指令专用：发送文本直接解析为任务"""
-    data = request.get_json(force=True, silent=True) or {}
-    text = data.get("text", "").strip()
+    """快捷指令专用：发送文本直接解析为任务（支持 JSON 和表单）"""
+    if request.is_json:
+        data = request.get_json(force=True, silent=True) or {}
+    else:
+        data = request.form
+    text = (data.get("text", "") or "").strip()
     openid = data.get("openid", "shortcuts_user")
     if not text:
         return {"ok": False, "error": "text is required"}, 400
