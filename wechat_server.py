@@ -891,7 +891,28 @@ def scheduled_push():
             if send_wx_message(openid, msg):
                 sent += 1
 
-    return {"sent_to": sent, "wx_errors": len(_all_tasks) - sent, "server_time": now.strftime("%H:%M"), "server_hour": hour}
+    return {
+        "sent_to": sent, "wx_errors": len(_all_tasks) - sent,
+        "server_time": now.strftime("%H:%M"), "server_hour": hour,
+        "wx_debug": _wx_debug if '_wx_debug' in dir() else "",
+    }
+
+
+@app.route("/wx-debug")
+def wx_debug():
+    """测试微信消息发送"""
+    load_all()
+    users = list(_all_tasks.keys())
+    if not users:
+        return {"error": "no users"}
+    openid = users[0]
+    token = get_wx_access_token()
+    r = requests.post(
+        f"https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token={token}",
+        json={"touser": openid, "msgtype": "text", "text": {"content": "测试消息"}},
+        timeout=10,
+    )
+    return {"openid": openid[:15] + "...", "token_ok": bool(token), "result": r.json()}
 
 
 @app.route("/check-reminders", methods=["GET", "POST"])
