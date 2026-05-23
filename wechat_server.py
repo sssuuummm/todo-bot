@@ -774,6 +774,16 @@ def api_add_task():
     return {"ok": True, "reply": reply}
 
 
+@app.route("/my-ip")
+def my_ip():
+    """返回 Render 服务器 IP"""
+    try:
+        r = requests.get("https://api.ipify.org", timeout=5)
+        return {"ip": r.text.strip()}
+    except Exception:
+        return {"ip": request.remote_addr or "unknown"}
+
+
 @app.route("/check-reminders", methods=["GET", "POST"])
 def check_reminders():
     """定时提醒检查——由外部 cron 服务调用"""
