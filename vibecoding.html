@@ -819,6 +819,12 @@
         renderQuadrantChart();
         updateCounter();
         saveToLocalStorage();
+        // 同步全量任务到服务器
+        fetch('/api/sync-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openid: 'web_user', tasks: tasks }),
+        }).catch(() => {});
     }
 
     // ==================== 四象限散点图 (Canvas) ====================
@@ -1164,6 +1170,12 @@
         taskInput.value = '';
         taskInput.focus();
         renderAll();
+        // 同步到服务器
+        fetch('/api/sync-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openid: 'web_user', task: newTask }),
+        }).catch(() => {});
     }
 
     // ==================== 操作 ====================

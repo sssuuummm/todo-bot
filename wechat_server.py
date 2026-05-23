@@ -781,6 +781,38 @@ def api_tasks():
         return {"tasks": [], "error": str(e)}
 
 
+@app.route("/api/sync-all", methods=["POST"])
+def api_sync_all():
+    """网页端全量同步任务"""
+    data = request.get_json(silent=True) or {}
+    new_tasks = data.get("tasks", [])
+    openid = data.get("openid", "web_user")
+    # 保留 WeChat 来源的任务，替换网页端的
+    existing = get_user_tasks(openid)
+    wechat_ids = {t["id"] for t in existing if t.get("source") == "wechat"}
+    merged = [t for t in existing if t["id"] in wechat_ids] + \
+             [t for t in new_tasks if t["id"] not in wechat_ids]
+    _all_tasks[openid] = merged
+    save_all()
+    return {"ok": True, "count": len(merged)}
+
+
+@app.route("/api/sync-task", methods=["POST"])
+def api_sync_task():
+    """网页端同步任务到服务器"""
+    data = request.get_json(silent=True) or {}
+    task = data.get("task", {})
+    openid = data.get("openid", "web_user")
+    if not task.get("id"):
+        return {"ok": False}, 400
+    tasks = get_user_tasks(openid)
+    # 去重：已存在同 id 就跳过
+    if not any(t.get("id") == task["id"] for t in tasks):
+        tasks.append(task)
+        save_all()
+    return {"ok": True}
+
+
 @app.route("/api/add-task", methods=["GET", "POST"])
 def api_add_task():
     """快捷指令专用：GET 参数直接传"""
