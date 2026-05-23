@@ -15,7 +15,8 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask, request, Response, send_from_directory
 import requests
 try:
-    from Crypto.Cipher import AES
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
     HAS_CRYPTO = True
 except ImportError:
     HAS_CRYPTO = False
@@ -570,14 +571,16 @@ class WeworkCrypto:
             struct.pack("!I", len(text.encode())) + raw
         raw = self._pad(raw)
         iv = self.key[:16]
-        cipher = AES.new(self.key, AES.MODE_CBC, iv)
-        return base64.b64encode(cipher.encrypt(raw)).decode()
+        cipher = Cipher(algorithms.AES(self.key), modes.CBC(iv), backend=default_backend())
+        encryptor = cipher.encryptor()
+        return base64.b64encode(encryptor.update(raw) + encryptor.finalize()).decode()
 
     def _decrypt(self, encrypted: str) -> str:
         data = base64.b64decode(encrypted)
         iv = self.key[:16]
-        cipher = AES.new(self.key, AES.MODE_CBC, iv)
-        raw = cipher.decrypt(data)
+        cipher = Cipher(algorithms.AES(self.key), modes.CBC(iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+        raw = decryptor.update(data) + decryptor.finalize()
         raw = self._unpad(raw)
         content_len = struct.unpack("!I", raw[16:20])[0]
         content = raw[20:20 + content_len].decode()
