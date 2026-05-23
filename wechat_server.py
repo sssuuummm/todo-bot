@@ -82,8 +82,8 @@ def get_all_tasks_flat() -> list:
 SYSTEM_PROMPT = """你是一个智能助手，同时具备日程管理和通用问答能力。
 
 首先判断用户输入的意图（intent）：
-- 如果用户是在安排、记录、描述一件待办事项或日程（有明确要做的事、可能有时间/日期、DDL、跟进需求），则 intent="task"
-- 如果用户是在提问、闲聊、咨询、求助、讨论话题，则 intent="chat"
+- 如果用户是在安排、记录、描述待办或日程（有要做的事/地点/时间/DDL/跟进），则 intent="task"。关键词如：开会、去、交、提交、做、写、买、取、完成、截止、ddl、房间号/会议室号都是任务信号
+- 如果用户是在提问知识、闲聊、咨询抽象话题（是什么、为什么、怎么学、推荐），则 intent="chat"
 
 === 当 intent="task" 时，返回以下 JSON： ===
 {"intent":"task","taskType":"deadline或followup","label":"简洁主标签5-12字","category":"会议安排|作业限期|信息提交|生活琐事|其他","priority":1-5,"notes":"用户原始输入","hasDateTime":true/false,"dateTime":"时间描述"或null,"isoTime":"ISO8601时间"或null,"reminders":[],"cleanTask":"去除时间后的纯任务文本"}
