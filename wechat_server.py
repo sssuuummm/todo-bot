@@ -123,6 +123,21 @@ taskType规则：有要做的事+有时间点=deadline。只有明确含"跟进/
 只返回JSON，不说别的。"""
 
 
+def chat_reply(prompt: str) -> str | None:
+    """简单 AI 回复，用于推送消息"""
+    try:
+        resp = requests.post(
+            f"{LLM_CONFIG['base_url']}/v1/chat/completions",
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {LLM_CONFIG['api_key']}"},
+            json={"model": LLM_CONFIG["model"], "messages": [{"role": "user", "content": prompt}], "temperature": 0.9, "max_tokens": 150},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception:
+        return None
+
+
 def analyze_with_llm(text: str) -> dict | None:
     now_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S 北京时间")
     prompt = SYSTEM_PROMPT.replace("{current_time}", now_str)
@@ -845,35 +860,27 @@ def scheduled_push():
     sent = 0
 
     for openid in _all_tasks:
-        # 下午1点：推送当日任务
+        tasks = get_user_tasks(openid)
+        # 下午1点：AI 写当日任务推送
         if hour == 13:
-            tasks = get_user_tasks(openid)
             active = [t for t in tasks if not t.get("completed")]
             if not active:
                 continue
-            lines = [f"📋 今日任务 {now.strftime('%m/%d')}：\n"]
-            for i, t in enumerate(active[:10]):
-                label = t.get("label") or t.get("text", "")
-                due = ""
-                if t.get("dueTimestamp"):
-                    d = safe_iso(t["dueTimestamp"])
-                    if d:
-                        diff_h = (d - now).total_seconds() / 3600
-                        if diff_h <= 0:
-                            due = " ⚠已过期"
-                        elif diff_h < 24:
-                            due = f" ⏰{int(diff_h)}h后"
-                        else:
-                            due = f" {d.strftime('%m/%d %H:%M')}"
-                lines.append(f"{i+1}. {label}{due}")
-            if len(active) > 10:
-                lines.append(f"...还有{len(active)-10}项")
-            send_wx_message(openid, "\n".join(lines))
+            task_list = "\n".join([
+                f"- {t.get('label') or t.get('text','')} [{t.get('category','')}]"
+                + (f" 截止{datetime.fromisoformat(t['dueTimestamp']).strftime('%H:%M')}" if t.get('dueTimestamp') and safe_iso(t['dueTimestamp']) else "")
+                for t in active[:10]
+            ])
+            prompt = f"现在是{now.strftime('%H:%M')}。用温暖鼓励的语气写一条50字以内的今日任务提醒。任务：\n{task_list}\n\n不要列清单，自然地说。参考语气：'下午好！今天有3件事等着你——最重要的是下午两点的会。加油，一件一件来。'"
+            msg = chat_reply(prompt) or f"📋 今日 {len(active)} 项待办，加油！"
+            send_wx_message(openid, msg)
             sent += 1
 
-        # 晚上10点：提醒睡觉
+        # 晚上10点：AI 写睡觉提醒
         elif hour == 22:
-            send_wx_message(openid, "🌙 夜深了，该休息了。\n\n放下手机，准备睡觉吧。明天的事交给明天的你。")
+            prompt = "用温柔关心的语气写一条30字以内的睡前提醒。针对ADHD用户，不要命令式。每次内容都不同。"
+            msg = chat_reply(prompt) or "🌙 夜深了，该休息了。放下手机，明天的事交给明天的你。"
+            send_wx_message(openid, msg)
             sent += 1
 
     return {"sent_to": sent}
