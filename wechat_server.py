@@ -844,49 +844,51 @@ def api_add_task():
 
 @app.route("/api/parse-task", methods=["GET"])
 def api_parse_task():
-    """快捷指令专用：解析任务，返回纯文本供日历/通知使用"""
+    """快捷指令专用：解析任务，有 DDL 则返回 .ics 日历文件"""
     text = request.args.get("text", "").strip()
     openid = request.args.get("openid", "iphone_user")
     if not text:
-        return "EMPTY"
+        return Response("", status=400)
 
     result = analyze_with_llm(text)
-    if not result:
-        return f"FAILED|{text}"
-
-    if result.get("intent") == "chat":
-        return f"CHAT|{result.get('reply', '')}"
+    if not result or result.get("intent") == "chat":
+        return Response("无日程信息，仅闲聊", content_type="text/plain; charset=utf-8")
 
     due_ts = result.get("isoTime") or (compute_absolute_time(result["dateTime"]) if result.get("hasDateTime") and result.get("dateTime") else None)
     cat = result.get("category", "其他")
     reminders = DEFAULT_REMINDERS.get(cat, [30])
     label = result.get("label") or result.get("cleanTask") or text
 
-    # 存储任务
+    # 存储
     task = {
         "id": f"{int(time.time() * 1000)}-{hashlib.md5(text.encode()).hexdigest()[:6]}",
-        "taskType": result.get("taskType", "deadline"),
-        "label": label,
-        "category": cat,
-        "priority": result.get("priority", 1),
-        "notes": result.get("notes", text),
-        "reminders": reminders,
-        "text": result.get("cleanTask") or text,
-        "completed": False,
-        "createdAt": int(time.time() * 1000),
-        "dueDate": result.get("dateTime") if result.get("hasDateTime") else None,
-        "dueTimestamp": due_ts,
-        "checkInterval": 7200 if result.get("taskType") == "followup" else None,
-        "nextCheckTime": (datetime.now(TZ) + timedelta(minutes=7200)).isoformat() if result.get("taskType") == "followup" else None,
-        "userImportant": None,
+        "taskType": result.get("taskType", "deadline"), "label": label, "category": cat,
+        "priority": result.get("priority", 1), "notes": result.get("notes", text),
+        "reminders": reminders, "text": result.get("cleanTask") or text, "completed": False,
+        "createdAt": int(time.time() * 1000), "dueDate": result.get("dateTime") if result.get("hasDateTime") else None,
+        "dueTimestamp": due_ts, "checkInterval": None, "nextCheckTime": None, "userImportant": None,
     }
     tasks = get_user_tasks(openid)
     tasks.append(task)
     save_all()
 
-    # 把任务 ID 存到临时变量，供后续查字段用
-    task_id = task["id"]
-    return task_id  # 返回纯文本 ID
+    # 有 DDL → 返回 .ics 日历文件，iOS 自动弹出添加
+    if due_ts:
+        d = safe_iso(due_ts)
+        if d:
+            end = d + timedelta(hours=1)
+            ics = (
+                "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//TodoBot//CN\n"
+                "BEGIN:VEVENT\n"
+                f"DTSTART:{d.strftime('%Y%m%dT%H%M%S')}\n"
+                f"DTEND:{end.strftime('%Y%m%dT%H%M%S')}\n"
+                f"SUMMARY:{label}\n"
+                f"DESCRIPTION:{text}\n"
+                "END:VEVENT\nEND:VCALENDAR"
+            )
+            return Response(ics, content_type="text/calendar; charset=utf-8",
+                          headers={"Content-Disposition": "attachment; filename=task.ics"})
+    return Response(f"已添加：{label}", content_type="text/plain; charset=utf-8")
 
 
 @app.route("/api/task-field", methods=["GET"])
