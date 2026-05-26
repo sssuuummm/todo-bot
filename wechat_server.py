@@ -844,28 +844,29 @@ def api_add_task():
 
 @app.route("/api/parse-task", methods=["GET"])
 def api_parse_task():
-    """快捷指令专用：解析任务文本，返回结构化数据"""
+    """快捷指令专用：解析任务，返回纯文本供日历/通知使用"""
     text = request.args.get("text", "").strip()
     openid = request.args.get("openid", "iphone_user")
     if not text:
-        return {"ok": False}
+        return "EMPTY"
 
     result = analyze_with_llm(text)
     if not result:
-        return {"ok": False, "label": text, "category": "其他", "has_time": False}
+        return f"FAILED|{text}"
 
     if result.get("intent") == "chat":
-        return {"ok": False, "is_chat": True, "reply": result.get("reply", "")}
+        return f"CHAT|{result.get('reply', '')}"
 
     due_ts = result.get("isoTime") or (compute_absolute_time(result["dateTime"]) if result.get("hasDateTime") and result.get("dateTime") else None)
     cat = result.get("category", "其他")
     reminders = DEFAULT_REMINDERS.get(cat, [30])
+    label = result.get("label") or result.get("cleanTask") or text
 
     # 存储任务
     task = {
         "id": f"{int(time.time() * 1000)}-{hashlib.md5(text.encode()).hexdigest()[:6]}",
         "taskType": result.get("taskType", "deadline"),
-        "label": result.get("label") or result.get("cleanTask") or text,
+        "label": label,
         "category": cat,
         "priority": result.get("priority", 1),
         "notes": result.get("notes", text),
@@ -883,18 +884,28 @@ def api_parse_task():
     tasks.append(task)
     save_all()
 
-    return {
-        "ok": True,
-        "id": task["id"],
-        "label": task["label"],
-        "category": task["category"],
-        "priority": task["priority"],
-        "notes": task["notes"],
-        "has_time": bool(due_ts),
-        "due_date": due_ts[:10] if due_ts else "",
-        "due_time": due_ts[11:16] if due_ts else "",
-        "due_iso": due_ts or "",
-    }
+    # 把任务 ID 存到临时变量，供后续查字段用
+    task_id = task["id"]
+    return task_id  # 返回纯文本 ID
+
+
+@app.route("/api/task-field", methods=["GET"])
+def api_task_field():
+    """快捷指令：根据任务 ID 拿单个字段值（纯文本）"""
+    tid = request.args.get("id", "")
+    field = request.args.get("field", "label")
+    openid = request.args.get("openid", "iphone_user")
+    load_all()
+    for t in get_user_tasks(openid):
+        if t.get("id") == tid:
+            if field == "date" and t.get("dueTimestamp"):
+                d = safe_iso(t["dueTimestamp"])
+                return d.strftime("%Y-%m-%d") if d else ""
+            if field == "time" and t.get("dueTimestamp"):
+                d = safe_iso(t["dueTimestamp"])
+                return d.strftime("%H:%M") if d else ""
+            return str(t.get(field, ""))
+    return ""
 
 
 @app.route("/api/task-list", methods=["GET"])
