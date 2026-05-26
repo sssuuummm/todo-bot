@@ -42,6 +42,7 @@ LLM_CONFIG = {
 
 TASKS_FILE = "tasks.json"
 TZ = timezone(timedelta(hours=8))
+_last_task: dict[str, str] = {}  # openid → last task id
 
 
 def safe_iso(s):
@@ -872,14 +873,35 @@ def api_parse_task():
     tasks.append(task)
     save_all()
 
-    # 返回 JSON，快捷指令用"获取词典值"(手动键入字段名)逐字段取
-    resp = {"ok": True, "label": label, "category": cat, "notes": result.get("notes", text)}
-    if due_ts:
-        d = safe_iso(due_ts)
-        if d:
-            resp["due_date"] = d.strftime("%Y-%m-%d")
-            resp["due_time"] = d.strftime("%H:%M")
-    return resp
+    # 记住最后创建的任务 ID
+    _last_task[openid] = task["id"]
+
+    # 返回纯文本：直接是 label，快捷指令拿去做标题
+    return Response(label, content_type="text/plain; charset=utf-8")
+
+
+@app.route("/api/last-field", methods=["GET"])
+def api_last_field():
+    """快捷指令：取上一个 parse-task 创建的任务的某个字段（纯文本）"""
+    field = request.args.get("field", "label")
+    openid = request.args.get("openid", "iphone_user")
+    tid = _last_task.get(openid, "")
+    if not tid:
+        return Response("", content_type="text/plain")
+    load_all()
+    for t in get_user_tasks(openid):
+        if t.get("id") == tid:
+            if field == "date" and t.get("dueTimestamp"):
+                d = safe_iso(t["dueTimestamp"])
+                return Response(d.strftime("%Y-%m-%d") if d else "", content_type="text/plain")
+            if field == "time" and t.get("dueTimestamp"):
+                d = safe_iso(t["dueTimestamp"])
+                return Response(d.strftime("%H:%M") if d else "", content_type="text/plain")
+            if field == "notes":
+                return Response(t.get("notes", ""), content_type="text/plain; charset=utf-8")
+            val = t.get(field, "")
+            return Response(str(val), content_type="text/plain; charset=utf-8")
+    return Response("", content_type="text/plain")
 
 
 @app.route("/api/task-field", methods=["GET"])
