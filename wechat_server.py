@@ -886,10 +886,12 @@ def api_parse_task():
                 f"DESCRIPTION:{text}\n"
                 "END:VEVENT\nEND:VCALENDAR"
             )
+            import urllib.parse
+            ics_encoded = urllib.parse.quote(ics, safe='')
             html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>添加日历</title></head><body style="font-family:system-ui;text-align:center;padding-top:40vh;">
 <p style="font-size:1.2em">📅 {label}</p><p style="color:#666">{d.strftime('%m月%d日 %H:%M')}</p>
-<a href="data:text/calendar;charset=utf-8,{ics}" style="display:inline-block;margin-top:20px;padding:12px 40px;background:#2a6df4;color:white;border-radius:12px;text-decoration:none;font-weight:600">点此添加到日历</a>
+<a href="data:text/calendar;charset=utf-8,{ics_encoded}" style="display:inline-block;margin-top:20px;padding:12px 40px;background:#2a6df4;color:white;border-radius:12px;text-decoration:none;font-weight:600">点此添加到日历</a>
 <p style="color:#999;font-size:0.8em;margin-top:30px">如未弹出，请用 Safari 打开此页面</p>
 </body></html>"""
             return Response(html, content_type="text/html; charset=utf-8")
