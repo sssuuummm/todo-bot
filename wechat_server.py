@@ -872,30 +872,14 @@ def api_parse_task():
     tasks.append(task)
     save_all()
 
-    # 有 DDL → 返回一个 HTML 页面，点一下自动弹日历
+    # 返回 JSON，快捷指令用"获取词典值"(手动键入字段名)逐字段取
+    resp = {"ok": True, "label": label, "category": cat, "notes": result.get("notes", text)}
     if due_ts:
         d = safe_iso(due_ts)
         if d:
-            end = d + timedelta(hours=1)
-            ics = (
-                "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//TodoBot//CN\n"
-                "BEGIN:VEVENT\n"
-                f"DTSTART:{d.strftime('%Y%m%dT%H%M%S')}\n"
-                f"DTEND:{end.strftime('%Y%m%dT%H%M%S')}\n"
-                f"SUMMARY:{label}\n"
-                f"DESCRIPTION:{text}\n"
-                "END:VEVENT\nEND:VCALENDAR"
-            )
-            import urllib.parse
-            ics_encoded = urllib.parse.quote(ics, safe='')
-            html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>添加日历</title></head><body style="font-family:system-ui;text-align:center;padding-top:40vh;">
-<p style="font-size:1.2em">📅 {label}</p><p style="color:#666">{d.strftime('%m月%d日 %H:%M')}</p>
-<a href="data:text/calendar;charset=utf-8,{ics_encoded}" style="display:inline-block;margin-top:20px;padding:12px 40px;background:#2a6df4;color:white;border-radius:12px;text-decoration:none;font-weight:600">点此添加到日历</a>
-<p style="color:#999;font-size:0.8em;margin-top:30px">如未弹出，请用 Safari 打开此页面</p>
-</body></html>"""
-            return Response(html, content_type="text/html; charset=utf-8")
-    return Response(f"已添加：{label}\n（无具体时间，仅在任务列表中）", content_type="text/plain; charset=utf-8")
+            resp["due_date"] = d.strftime("%Y-%m-%d")
+            resp["due_time"] = d.strftime("%H:%M")
+    return resp
 
 
 @app.route("/api/task-field", methods=["GET"])
