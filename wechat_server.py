@@ -838,9 +838,103 @@ def api_add_task():
     openid = data.get("openid", "shortcuts_user")
     if not text:
         return {"ok": False, "error": "text is required"}, 400
-
     reply = handle_text_message(openid, "gh_shortcuts", text)
     return {"ok": True, "reply": reply}
+
+
+@app.route("/api/parse-task", methods=["GET"])
+def api_parse_task():
+    """快捷指令专用：解析任务文本，返回结构化数据"""
+    text = request.args.get("text", "").strip()
+    openid = request.args.get("openid", "iphone_user")
+    if not text:
+        return {"ok": False}
+
+    result = analyze_with_llm(text)
+    if not result:
+        return {"ok": False, "label": text, "category": "其他", "has_time": False}
+
+    if result.get("intent") == "chat":
+        return {"ok": False, "is_chat": True, "reply": result.get("reply", "")}
+
+    due_ts = result.get("isoTime") or (compute_absolute_time(result["dateTime"]) if result.get("hasDateTime") and result.get("dateTime") else None)
+    cat = result.get("category", "其他")
+    reminders = DEFAULT_REMINDERS.get(cat, [30])
+
+    # 存储任务
+    task = {
+        "id": f"{int(time.time() * 1000)}-{hashlib.md5(text.encode()).hexdigest()[:6]}",
+        "taskType": result.get("taskType", "deadline"),
+        "label": result.get("label") or result.get("cleanTask") or text,
+        "category": cat,
+        "priority": result.get("priority", 1),
+        "notes": result.get("notes", text),
+        "reminders": reminders,
+        "text": result.get("cleanTask") or text,
+        "completed": False,
+        "createdAt": int(time.time() * 1000),
+        "dueDate": result.get("dateTime") if result.get("hasDateTime") else None,
+        "dueTimestamp": due_ts,
+        "checkInterval": 7200 if result.get("taskType") == "followup" else None,
+        "nextCheckTime": (datetime.now(TZ) + timedelta(minutes=7200)).isoformat() if result.get("taskType") == "followup" else None,
+        "userImportant": None,
+    }
+    tasks = get_user_tasks(openid)
+    tasks.append(task)
+    save_all()
+
+    return {
+        "ok": True,
+        "id": task["id"],
+        "label": task["label"],
+        "category": task["category"],
+        "priority": task["priority"],
+        "notes": task["notes"],
+        "has_time": bool(due_ts),
+        "due_date": due_ts[:10] if due_ts else "",
+        "due_time": due_ts[11:16] if due_ts else "",
+        "due_iso": due_ts or "",
+    }
+
+
+@app.route("/api/task-list", methods=["GET"])
+def api_task_list():
+    """快捷指令专用：返回活跃任务列表"""
+    openid = request.args.get("openid", "iphone_user")
+    load_all()
+    tasks = get_user_tasks(openid)
+    active = [t for t in tasks if not t.get("completed")]
+    items = []
+    for t in active:
+        due_str = ""
+        if t.get("dueTimestamp"):
+            d = safe_iso(t["dueTimestamp"])
+            if d:
+                due_str = d.strftime("%m/%d %H:%M")
+        items.append({
+            "id": t["id"],
+            "label": t.get("label") or t.get("text", ""),
+            "category": t.get("category", ""),
+            "due": due_str,
+        })
+    return {"tasks": items, "count": len(items)}
+
+
+@app.route("/api/complete-task", methods=["GET", "POST"])
+def api_complete_task():
+    """快捷指令专用：标记任务完成"""
+    data = request.args if request.method == "GET" else (request.get_json(silent=True) or {})
+    task_id = data.get("id", "")
+    openid = data.get("openid", "iphone_user")
+    load_all()
+    tasks = get_user_tasks(openid)
+    for t in tasks:
+        if t["id"] == task_id:
+            t["completed"] = True
+            t["completedAt"] = datetime.now(TZ).isoformat()
+            save_all()
+            return {"ok": True, "label": t.get("label", "")}
+    return {"ok": False, "error": "not found"}
 
 
 @app.route("/my-ip")
